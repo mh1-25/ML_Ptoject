@@ -4,52 +4,68 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.compose import ColumnTransformer
 from sklearn.cluster import KMeans
 from sklearn.pipeline import Pipeline
-from sklearn.cluster import MiniBatchKMeans
 from sklearn.metrics import accuracy_score, adjusted_rand_score, normalized_mutual_info_score
 from scipy.stats import mode
 import warnings
+
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-train_df = pd.read_csv("Images/Dataset/train_processed.csv")
-test_df  = pd.read_csv("Images/Dataset/test_processed.csv")
+# ===================== LOAD DATA =====================
+train_df = pd.read_csv("ML_Ptoject/Images/Dataset/train_processed.csv")
+test_df  = pd.read_csv("ML_Ptoject/Images/Dataset/test_processed.csv")
 
-full_df = pd.concat([train_df, test_df], ignore_index=True)
+true_labels = train_df["label"].values
+features_df = train_df.drop("label", axis=1)
 
-true_labels = full_df["label"].values
-features_df = full_df.drop("label", axis=1)  # KEEP AS DATAFRAME
+numeric_columns = features_df.columns
 
-numeric_columns = features_df.columns  # Only numeric columns
-
+# ===================== PREPROCESSING =====================
 preprocessor = ColumnTransformer(
     transformers=[
         ('scaler', StandardScaler(), numeric_columns)
     ]
 )
 
+import umap
+
+# ===================== K-MEANS PIPELINE =====================
 kmeans_pipeline = Pipeline([
     ('preprocessor', preprocessor),
-    ('kmeans', MiniBatchKMeans(n_clusters=3, random_state=42, max_iter=100, batch_size=1400)) #1400 => 49.30
+    ('umap', umap.UMAP(n_components=2, random_state=42)),
+    ('kmeans', KMeans(n_clusters=7, random_state=42, n_init='auto'))
 ])
-4
-kmeans_pipeline.fit(features_df)
-cluster_labels = kmeans_pipeline['kmeans'].labels_
 
-for c in range(3):
+# ===================== TRAIN =====================
+kmeans_pipeline.fit(features_df)
+
+cluster_labels = kmeans_pipeline.named_steps['kmeans'].labels_
+
+# ===================== CLUSTER DISTRIBUTION =====================
+for c in range(7):
     count = np.sum(cluster_labels == c)
     percentage = (count / len(cluster_labels)) * 100
     print(f"Cluster {c}: {count} samples ({percentage:.1f}%)")
 
+# ===================== CLUSTER → LABEL MAPPING =====================
 label_mapping = {}
-for cluster in range(3):
-    mask = (cluster_labels == cluster)
+
+for c in range(7):
+    mask = cluster_labels == c
     if np.sum(mask) == 0:
         continue
-    true_labels_in_cluster = true_labels[mask]
-    most_common = mode(true_labels_in_cluster, keepdims=True).mode[0]
-    label_mapping[cluster] = most_common
 
+    true_labels_in_cluster = true_labels[mask]
+    label_mapping[c] = mode(true_labels_in_cluster, keepdims=True).mode[0]
+
+# ===================== PREDICTION =====================
 predicted_labels = np.array([label_mapping[c] for c in cluster_labels])
 
+# ===================== EVALUATION =====================
+ari = adjusted_rand_score(true_labels, cluster_labels)
+nmi = normalized_mutual_info_score(true_labels, cluster_labels)
 accuracy = accuracy_score(true_labels, predicted_labels)
+
 print("\n========= FINAL RESULTS =========")
-print(f"K-Means Accuracy: {accuracy:.4f} ({accuracy*100:.2f}%)")
+print(f"Accuracy (after mapping): {accuracy*100:.2f}%")
+print(f"ARI: {ari:.4f}")
+print(f"NMI: {nmi:.4f}")
